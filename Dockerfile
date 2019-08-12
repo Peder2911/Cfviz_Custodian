@@ -12,4 +12,4 @@ RUN mkdir /var/logs
 
 ADD R/* /var/script/
 
-CMD Rscript /var/script/watcher.R
+CMD Rscript /var/script/custodian.R
