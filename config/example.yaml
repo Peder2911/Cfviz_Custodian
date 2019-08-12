@@ -1,0 +1,9 @@
+con:
+   host: 'postgres'
+   port: 5432 
+   db: 'mydatabase'
+   user: 'postgres'
+   password: 'let_me_in'
+
+target_folder: '/var/data'
+logfile: '/var/logs/watcher.log'
