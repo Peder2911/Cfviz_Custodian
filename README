@@ -1,7 +1,4 @@
 A script to push excel data to a PostgreSQL server
 
-Looks for a configuration file at $CONFIGFILE, or /var/config/config.yaml by
-default. The file must contain the values shown in config/example.yaml.
-
-Keeps all data files in the {target_folder} folder synchronized to a Postgres
+Keeps all data files in /var/data synchronized to a Postgres
 database.

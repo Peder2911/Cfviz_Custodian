@@ -1,16 +1,24 @@
+#' Custodian script
+#'
+#' Connects to database container linked @ database 
+#' Database must serve at port 5432 and have a user
+#' "custodian" with the proper permissions
+#'
+#' The target datbase must be defined in the env
+#' variable TGT_DB
 
 library(RPostgreSQL)
 library(readxl)
 library(tools)
 
-configfile <- Sys.getenv('CONFIGFILE')
-if(configfile == ""){
-   configfile <- '/var/config/config.yaml'
-}
-config <- yaml::yaml.load_file(configfile)
-con_values <- config$con
-logf <- config$logfile
-dir <- config$target_folder
+database <- Sys.getenv('TGT_DB')
+dir <- '/var/data' 
+
+con_values <- list(host = 'database',
+                   port = 5432,
+                   user = 'custodian',
+                   db = database)
+
 
 # ================================
 
@@ -69,8 +77,11 @@ pushdata <- function(con, file){
          dbRemoveTable(con,dataname)
       }
 
-      dbWriteTable(con, dataname, data)
+      res <- dbWriteTable(con, dataname, data)
       log(paste0('INFO: successfully added ',dataname))
+      res <- dbExecute(con,paste0('GRANT SELECT ON ', dataname, ' TO public;'))
+      log(paste0('INFO: made ',dataname, ' public'))
+
    } else {
       log(paste0('WARN: unsupported (or no) extension', file))
    }
