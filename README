@@ -1,4 +1,17 @@
-A script to push excel data to a PostgreSQL server
 
-Keeps all data files in /var/data synchronized to a Postgres
-database.
+A script to push data to a PostgreSQL server
+
+Keeps all data files in /var/data synchronized to a Postgres database.
+
+Optionally transforms data before adding it to the database, using a batch
+script in /var/transform. 
+
+Data is transformed according to the "class" of the data, The class is defined
+as the first "word" in the filename.  For example, cf_3_3 is of class "cf", and
+will be transformed by the "cf" script under /var/transform.
+
+The env variable INTERVAL dictates how often the script will check
+for changes in the file timestamps.
+
+Run with DEBUG set in env to connect to a database on localhost, instead of
+trying to reach the "database"-database (which works well in docker).

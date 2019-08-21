@@ -10,14 +10,29 @@
 library(RPostgreSQL)
 library(readxl)
 library(tools)
+library(stringr)
+library(dplyr)
+library(lubridate)
+library(glue)
 
 database <- Sys.getenv('TGT_DB')
-dir <- '/var/data' 
+interval <- Sys.getenv('INTERVAL')
+
+datadir <- '/var/data' 
+scriptdir <- '/var/scripts' 
+
 
 con_values <- list(host = 'database',
                    port = 5432,
                    user = 'custodian',
                    db = database)
+
+if(Sys.getenv('DEBUG') != ''){
+   con_values$host <- 'localhost'
+   con_values$port <- 3254
+   con_values$user <- 'shiny'
+   con_values$db <- 'shiny'
+}
 
 
 # ================================
@@ -25,8 +40,9 @@ con_values <- list(host = 'database',
 log <- function(message){
    logf <- stdout()
    write(message,logf,append = TRUE)
-   #close(logf)
 }
+
+# ================================================
 
 getStamps <- function(directory){
    # Returns filename@timestamp for all files in directory
@@ -41,98 +57,143 @@ getStamps <- function(directory){
       extensions <- character()
    }
 
-   res <- data.frame(path = files, stamp = stamps,ext = extensions)
-   res
+   data.frame(path = files, stamp = stamps,ext = extensions)
 }
 
-fixdataname <- function(dataname){
-   if(grepl('[^A-Za-z0-9_]',dataname)){
-      inv <- dataname 
-      dataname <- gsub('[^A-Za-z0-9_]','_',dataname)
-      log(paste0('WARN: invalid data name: "',inv,'", using "',dataname,'"'))
+sanitizeName <- function(name){
+   if(grepl('[^A-Za-z0-9_]',name)){
+      invalid <- name 
+      name <- gsub('[^A-Za-z0-9_]','_',name)
+      log(paste0('WARN: invalid data name: "',invalid,'", using "',name,'"'))
    }
-   dataname
+   name 
 }
 
-pushdata <- function(con, file){
+getDataName <- function(path){
+   str_remove(path,'.*/') %>%
+      file_path_sans_ext() %>%
+      sanitizeName()
+}
+
+getScripts <- function(paths){
+      scriptnames <- sapply(paths, str_extract,
+                               pattern = '[a-zA-Z]+(?=\\.R)')
+      functions <- lapply(paths,
+                          dget)
+      names(functions) <- scriptnames 
+      functions 
+}
+
+# ================================================
+
+readdata <- function(path){
    read_disp <- list(csv = read.csv,
                      xlsx = read_xlsx)
-
-   dataname <- strsplit(file,'/') 
-   dataname <- dataname[[1]][length(dataname[[1]])]
-   dataname <- gsub('\\..*$','',dataname)
-   dataname <- fixdataname(dataname)
-
-   ext <- tools::file_ext(file)
+   ext <- tools::file_ext(path)
    if(ext %in% names(read_disp)){
-      data <- read_disp[[tools::file_ext(file)]](file)
-
-      if(any(grepl('[A-Z]',names(data)))){
-         log(paste0('WARN: lowercasing names for ',dataname))
-         names(data) <- tolower(names(data))   
-      }
-
-      if(dataname %in% dbListTables(con)){
-         log(paste0('WARN: dropping preexisting ',dataname))
-         dbRemoveTable(con,dataname)
-      }
-
-      res <- dbWriteTable(con, dataname, data)
-      log(paste0('INFO: successfully added ',dataname))
-      res <- dbExecute(con,paste0('GRANT SELECT ON ', dataname, ' TO public;'))
-      log(paste0('INFO: made ',dataname, ' public'))
-
+      read_disp[[tools::file_ext(path)]](path)
    } else {
-      log(paste0('WARN: unsupported (or no) extension', file))
+      NULL
+   }
+
+}
+
+transformdata <- function(data,class,scriptdir){
+   scripts <- getScripts(list.files(scriptdir, full.names = TRUE))
+   if(class %in% names(scripts)){
+      log(paste0('INFO: Transforming as ',class))
+      data <- scripts[[class]](data)
+      log(paste0('INFO: Successfully transformed!'))
+   } else {
+   }
+   data
+}
+
+pushdata <- function(data,con,name){
+
+   if(any(grepl('[A-Z]',names(data)))){
+      log(paste0('WARN: lowercasing names for ',name))
+      names(data) <- tolower(names(data))   
+   }
+
+   if(name %in% dbListTables(con)){
+      log(paste0('WARN: dropping preexisting ',name))
+      dbRemoveTable(con,name)
+   }
+
+   res <- dbWriteTable(con, name, data)
+   log(paste0('INFO: successfully added ',name))
+   res <- dbExecute(con,paste0('GRANT SELECT ON ', name, ' TO public;'))
+   log(paste0('INFO: made ', name, ' public'))
+}
+
+dropdata <- function(con, name){
+   if(name %in% dbListTables(con)){
+      dbRemoveTable(con,name)
+      log(paste0('INFO: successfully dropped ',name))
+   } else {
+      log(paste0('WARN: ', name, ' not in DB'))
    }
 }
 
-dropdata <- function(con, file){
-   dataname <- strsplit(file,'/') 
-   dataname <- dataname[[1]][length(dataname[[1]])]
-   dataname <- gsub('\\..*$','',dataname)
-   dataname <- fixdataname(dataname)
+# ================================================
 
-   if(dataname %in% dbListTables(con)){
-      dbRemoveTable(con,dataname)
-      log(paste0('INFO: successfully dropped ',dataname))
-   } else {
-      log(paste0('WARN: ', dataname, ' not in DB'))
-   }
+diff <- function(now,old){
+   added <- setdiff(now,old)
+   removed <- setdiff(old,now)
+   list(added=added,removed=removed)
 }
 
-# ================================
+filediff <- function(new,old){
+   diff <- diff(new$stamp, old$stamp)
+   list(added = new[new$stamp %in% diff$added,], 
+        removed = old[old$stamp %in% diff$removed,])
+}
+
+# ================================================
 
 dr <- dbDriver('PostgreSQL')
 con_values$dr <- dr
 con <- do.call(dbConnect,con_values) 
 
-# ================================
+# ================================================
 
 oldstamps <- data.frame(path = character(),stamp = character()) 
-
 log('Starting service...')
 
 while(TRUE){
-   stamps <- getStamps(dir)
 
-   newfiles <- stamps[!stamps$stamp %in% oldstamps$stamp,]
-   removedfiles <- oldstamps[!oldstamps$stamp %in% stamps$stamp,]
+   stamps <- getStamps(datadir)
+   filechanges <- filediff(stamps,oldstamps)
 
-   if(nrow(removedfiles) > 0){
-      apply(removedfiles, 1, function(stamped_file){
+   if(nrow(filechanges$removed) > 0){
+      apply(filechanges$removed, 1, function(stamped_file){
          log(paste0('REMOVE: ',stamped_file['stamp']))
-         dropdata(con, stamped_file['path'])
+         name <- getDataName(stamped_file['path'])
+         dropdata(con, name)
       })
    }
 
-   if(nrow(newfiles) > 0){
-      apply(newfiles, 1, function(stamped_file){
-         log(paste0('ADD: ',stamped_file['stamp']))
-         pushdata(con, stamped_file['path'])
+   if(nrow(filechanges$added) > 0){
+      apply(filechanges$added, 1, function(stamped_file){
+
+         name <- getDataName(stamped_file['path'])
+         class <- str_extract(name,'[A-Za-z]+')
+
+         log(paste0('ADD: ',stamped_file['stamp'], ' of class ', class))
+
+         data <- readdata(stamped_file['path'])
+
+         if(!is.null(data)){
+            data <- transformdata(data,class,scriptdir) %>%
+               pushdata(con,name)
+         } else {
+            log(paste0('WARN: ', stamped_file['stamp'], ' was NULL'))
+         }
       })
    }
    
    oldstamps <- stamps
+
    Sys.sleep(0.5)
 }
