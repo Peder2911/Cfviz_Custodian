@@ -13,5 +13,7 @@ will be transformed by the "cf" script under /var/transform.
 The env variable INTERVAL dictates how often the script will check
 for changes in the file timestamps.
 
-Run with DEBUG set in env to connect to a database on localhost, instead of
-trying to reach the "database"-database (which works well in docker).
+Run with TESTING env set to connect to the test.sqlite file instead of trying
+to reach database:5432.  This is useful for creating test-databases for the
+apps. This also changes the folder being synched to ./data and the script
+folder to ./scripts.
