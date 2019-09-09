@@ -1,6 +1,9 @@
 
+*.sqlite
 config/*
 !config/exaple.yaml
 
 data/*
 !data/.gitkeep
+scripts/*
+!scripts/.gitkeep

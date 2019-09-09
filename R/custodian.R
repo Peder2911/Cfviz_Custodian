@@ -1,3 +1,14 @@
+#!/usr/bin/Rscript
+header <- "
+████████▄     ▄████████     ███        ▄████████       ▄████████ ███    █▄     ▄████████     ███      ▄██████▄  ████████▄   ▄█     ▄████████ ███▄▄▄▄   
+███   ▀███   ███    ███ ▀█████████▄   ███    ███      ███    ███ ███    ███   ███    ███ ▀█████████▄ ███    ███ ███   ▀███ ███    ███    ███ ███▀▀▀██▄ 
+███    ███   ███    ███    ▀███▀▀██   ███    ███      ███    █▀  ███    ███   ███    █▀     ▀███▀▀██ ███    ███ ███    ███ ███▌   ███    ███ ███   ███ 
+███    ███   ███    ███     ███   ▀   ███    ███      ███        ███    ███   ███            ███   ▀ ███    ███ ███    ███ ███▌   ███    ███ ███   ███ 
+███    ███ ▀███████████     ███     ▀███████████      ███        ███    ███ ▀███████████     ███     ███    ███ ███    ███ ███▌ ▀███████████ ███   ███ 
+███    ███   ███    ███     ███       ███    ███      ███    █▄  ███    ███          ███     ███     ███    ███ ███    ███ ███    ███    ███ ███   ███ 
+███   ▄███   ███    ███     ███       ███    ███      ███    ███ ███    ███    ▄█    ███     ███     ███    ███ ███   ▄███ ███    ███    ███ ███   ███ 
+████████▀    ███    █▀     ▄████▀     ███    █▀       ████████▀  ████████▀   ▄████████▀     ▄████▀    ▀██████▀  ████████▀  █▀     ███    █▀   ▀█   █▀  
+"
 #' Custodian script
 #'
 #' Connects to database container linked @ database 
@@ -7,39 +18,50 @@
 #' The target datbase must be defined in the env
 #' variable TGT_DB
 
-library(RPostgreSQL)
-library(readxl)
-library(tools)
-library(stringr)
-library(dplyr)
-library(lubridate)
-library(glue)
+shh <- suppressPackageStartupMessages
+shh(library(RSQLite))
+shh(library(RPostgreSQL))
+shh(library(readxl))
+shh(library(tools))
+shh(library(stringr))
+shh(library(dplyr))
+shh(library(lubridate))
+shh(library(glue))
 
-database <- Sys.getenv('TGT_DB')
 interval <- Sys.getenv('INTERVAL')
-
-datadir <- '/var/data' 
-scriptdir <- '/var/scripts' 
-
-
-con_values <- list(host = 'database',
-                   port = 5432,
-                   user = 'custodian',
-                   db = database)
-
-if(Sys.getenv('DEBUG') != ''){
-   con_values$host <- 'localhost'
-   con_values$port <- 3254
-   con_values$user <- 'shiny'
-   con_values$db <- 'shiny'
+if(is.null(interval)){
+   interval <- 0.5
 }
 
-
-# ================================
-
 log <- function(message){
+   message <- gsub("INFO","\x1b[38;5;45mINFO\x1b[0m",message)
+   message <- gsub("ADD","\x1b[38;5;41mADD\x1b[0m",message)
+   message <- gsub("WARN","\x1b[38;5;160mWARN\x1b[0m",message)
    logf <- stdout()
    write(message,logf,append = TRUE)
+}
+
+# ================================================
+
+# Debug or production
+if(Sys.getenv('TESTING') == '' & !interactive()){
+   log(" *** Main mode *** ")
+   DRIVER <<- "postgres"
+   datadir <- '/var/data' 
+   scriptdir <- '/var/scripts' 
+
+   con_values <- list(host = "database",
+                   port = 5432,
+                   user = "custodian",
+                   db = "shiny",
+                   drv = PostgreSQL())
+} else {
+   log(" *** Testing mode *** ")
+   DRIVER <<- "sqlite"
+   datadir <- './data'
+   scriptdir <- './scripts'
+   con_values <- list(drv = SQLite(),
+                      dbname = "test.sqlite")
 }
 
 # ================================================
@@ -105,6 +127,7 @@ transformdata <- function(data,class,scriptdir){
       data <- scripts[[class]](data)
       log(paste0('INFO: Successfully transformed!'))
    } else {
+      log(paste0("No script found for data of type ",class))
    }
    data
 }
@@ -123,8 +146,12 @@ pushdata <- function(data,con,name){
 
    res <- dbWriteTable(con, name, data)
    log(paste0('INFO: successfully added ',name))
-   res <- dbExecute(con,paste0('GRANT SELECT ON ', name, ' TO public;'))
-   log(paste0('INFO: made ', name, ' public'))
+   if(DRIVER == "postgres"){
+      res <- dbExecute(con,paste0('GRANT SELECT ON ', name, ' TO public;'))
+      log(paste0('INFO: made ', name, ' public'))
+   } else {
+      log("INFO: no permission work to do! (sqlite)")
+   }
 }
 
 dropdata <- function(con, name){
@@ -159,7 +186,8 @@ con <- do.call(dbConnect,con_values)
 # ================================================
 
 oldstamps <- data.frame(path = character(),stamp = character()) 
-log('Starting service...')
+log(header)
+log(' *** Ready to munch some data! *** ')
 
 while(TRUE){
 
