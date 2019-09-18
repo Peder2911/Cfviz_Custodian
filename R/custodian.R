@@ -109,11 +109,15 @@ getScripts <- function(paths){
 # ================================================
 
 readdata <- function(path){
-   read_disp <- list(csv = read.csv,
-                     xlsx = read_xlsx)
+   read_disp <- list(csv = "read.csv",
+                     xlsx = "read_xlsx")
    ext <- tools::file_ext(path)
    if(ext %in% names(read_disp)){
-      read_disp[[tools::file_ext(path)]](path)
+      readcall <- call(read_disp[[ext]], path)
+      if(ext == "csv"){
+         readcall[["stringsAsFactors"]] <- FALSE
+      }
+      eval(readcall)
    } else {
       NULL
    }
