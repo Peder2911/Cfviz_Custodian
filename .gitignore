@@ -5,5 +5,3 @@ config/*
 
 data/*
 !data/.gitkeep
-scripts/*
-!scripts/.gitkeep
